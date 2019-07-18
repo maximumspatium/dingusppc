@@ -2,6 +2,7 @@
 #include <string>
 #include <sstream>
 #include <iostream>
+#include <chrono>
 #include <map>
 #include "ppcemumain.h"
 #include "ppcmemory.h"
@@ -56,10 +57,55 @@ void execute_single_instr()
     }
 }
 
+void execute_optimized()
+{
+    uint32_t cache[25];
+    uint32_t save_pc, fake_pc, ctr;
+    string   cmd;
+
+    cout << "Executing optimized loop..." << endl;
+
+    fake_pc = ppc_state.ppc_pc;
+
+    for(int i = 0; i < 21; i++) {
+        quickinstruction_translate(ppc_state.ppc_pc);
+        cache[i] = ppc_cur_instruction;
+        ppc_state.ppc_pc += 4;
+        ppc_cur_instruction = 0;
+    }
+
+    save_pc = ppc_state.ppc_pc;
+    ctr = ppc_state.ppc_spr[9];
+
+    while (fake_pc < save_pc) {
+        ppc_cur_instruction = cache[(fake_pc - 0xfff03454) >> 2];
+        if (ppc_cur_instruction == 0x4200FFB0) { // emulate bdnz directly
+            if (--ctr) {
+                ppc_state.ppc_spr[9] = ctr;
+                fake_pc -= 0x50;
+            } else {
+                fake_pc += 4;
+            }
+        } else {
+            ppc_main_opcode();
+            fake_pc += 4;
+        }
+    }
+
+    ppc_state.ppc_pc = save_pc; // FEXME: hardcoded
+    ppc_cur_instruction = 0;
+    //dump_regs();
+}
+
 void execute_until(uint32_t goal_addr)
 {
-    while(ppc_state.ppc_pc != goal_addr)
-        execute_single_instr();
+    while(ppc_state.ppc_pc != goal_addr) {
+        if (ppc_state.ppc_pc >= 0xfff03454 && ppc_state.ppc_pc < 0xfff034a8 &&
+            (goal_addr < 0xfff03454 || goal_addr >= 0xfff034a8))
+            execute_optimized();
+        else
+            execute_single_instr();
+    }
 }
 
 void enter_debugger()
@@ -96,9 +142,14 @@ void enter_debugger()
         } else if (cmd == "step") {
             execute_single_instr();
         } else if (cmd == "until") {
+            chrono::time_point<chrono::system_clock> start, end;
+            start = chrono::system_clock::now();
             ss >> addr_str;
             addr = stol(addr_str, NULL, 16);
             execute_until(addr);
+            end = chrono::system_clock::now();
+            int elapsed_seconds = chrono::duration_cast<chrono::seconds>(end-start).count();
+            cout << "Ready in " << elapsed_seconds << "s" << endl;
         } else if (cmd == "disas") {
             cout << "Disassembling not implemented yet. Sorry!" << endl;
         } else {
