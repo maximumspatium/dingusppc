@@ -97,6 +97,64 @@ void execute_optimized()
     //dump_regs();
 }
 
+void benchmark_emulator()
+{
+    int instr_index;
+    uint32_t ctr;
+
+    uint32_t code[] = {
+        0x38800400, // li r4, 0x400
+        0x7C8903A6, // mtctr r4
+        0x38A00000, // li r5, 0
+        0x38A50001, // addi r5, r5, 1
+        0x38A50002, // addi r5, r5, 2
+        0x38A50003, // addi r5, r5, 3
+        0x38A50004, // addi r5, r5, 4
+        0x38A50005, // addi r5, r5, 5
+        0x38A50006, // addi r5, r5, 6
+        0x38A50007, // addi r5, r5, 7
+        0x38A50008, // addi r5, r5, 8
+        0x4200FFE0, // bdnz *pc-32
+    };
+
+    cout << "HiRes clock resolution: " <<
+		chrono::duration_cast<chrono::nanoseconds>(chrono::steady_clock::duration(1)).count()
+		<< " ns" << endl;
+
+    // run the clock once for cache fill etc.
+    auto start_time = chrono::steady_clock::now();
+    auto end_time = chrono::steady_clock::now();
+    auto time_elapsed = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time);
+    cout << "Time elapsed (dry run): " << time_elapsed.count() << " ns" << endl;
+
+    start_time = chrono::steady_clock::now();
+
+    instr_index = 0;
+
+    while (1) {
+        ppc_cur_instruction = code[instr_index];
+        if (ppc_cur_instruction == 0x4200FFE0) { // emulate bdnz directly
+            ctr = ppc_state.ppc_spr[9];
+            if (--ctr) {
+                ppc_state.ppc_spr[9] = ctr;
+                instr_index = 3;
+            } else {
+                ppc_state.ppc_spr[9] = ctr;
+                break;
+            }
+        } else {
+            ppc_main_opcode();
+            //ppc_tbr_update();
+            instr_index++;
+        }
+    }
+
+    end_time = chrono::steady_clock::now();
+    time_elapsed = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time);
+    cout << "Time elapsed: " << time_elapsed.count() << " ns" << endl;
+    //dump_regs();
+}
+
 void execute_until(uint32_t goal_addr)
 {
     while(ppc_state.ppc_pc != goal_addr) {
@@ -152,6 +210,8 @@ void enter_debugger()
             cout << "Ready in " << elapsed_seconds << "s" << endl;
         } else if (cmd == "disas") {
             cout << "Disassembling not implemented yet. Sorry!" << endl;
+        } else if (cmd == "benchmark") {
+            benchmark_emulator();
         } else {
             cout << "Unknown command: " << cmd << endl;
             continue;
